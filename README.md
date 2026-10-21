@@ -111,8 +111,6 @@ npm run db:test           # pgTAP: 50 tests covering RLS, privileges, stock, the
 npm run test:concurrency  # 24 concurrent buyers race for 3 units; exactly 3 must win
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint, typecheck and build, and runs the pgTAP suite against a fresh Supabase stack.
-
 ## Deploying (Supabase Cloud + Vercel)
 
 1. **Database.** Create a Supabase project, then:
