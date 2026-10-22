@@ -21,7 +21,7 @@ export default async function ProductPage(props: PageProps<"/products/[id]">) {
 
   return (
     <div className="space-y-6">
-      <nav aria-label="Breadcrumb" className="text-sm text-stone-500">
+      <nav aria-label="Breadcrumb" className="text-sm text-zinc-500">
         <Link href="/" className="hover:underline">
           Shop
         </Link>{" "}
@@ -33,12 +33,12 @@ export default async function ProductPage(props: PageProps<"/products/[id]">) {
 
         <div className="space-y-5">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight">{product.name}</h1>
-            <p className="mt-1 font-mono text-xs text-stone-500">SKU {product.sku}</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">{product.name}</h1>
+            <p className="mt-1 font-mono text-xs text-zinc-500">SKU {product.sku}</p>
           </div>
           <p className="text-2xl font-semibold">{formatMoney(product.price)}</p>
           <StockBadge available={product.available_stock} />
-          <p className="leading-relaxed text-stone-700">{product.description}</p>
+          <p className="leading-relaxed text-zinc-600">{product.description}</p>
           <AddToCart
             product={{
               id: product.id,

@@ -2,7 +2,7 @@
 
 A small, production-shaped e-commerce system with three surfaces:
 
-- **Storefront**: product listing and detail pages, a persistent cart, Stripe Checkout, order confirmation, and "My orders" with a status timeline.
+- **Storefront**: product listing (client-side filter/sort), detail pages, a persistent cart, Stripe Checkout, order confirmation, and "My orders" with a status timeline. Signed-in customers get live catalogue toasts over SSE when products change.
 - **Stock management backend**: stock is reserved atomically, stock movements go to an append-only ledger, and overselling is impossible.
 - **Admin panel**: product CRUD with image upload, stock adjustments with a reason, order search and filtering, server-validated status transitions, and full refunds through Stripe.
 
@@ -10,7 +10,7 @@ A small, production-shaped e-commerce system with three surfaces:
 
 | | |
 |---|---|
-| Live URL | _add after deploying_ |
+| Live URL | https://order-managements.vercel.app |
 | Customer | `customer@example.com` / `Password123!` |
 | Admin | `admin@example.com` / `Password123!` |
 
@@ -78,7 +78,7 @@ The secret-reading modules import `server-only`, so the build fails if any of th
 
 1. Sign in as the customer, add products to the cart, and click **Checkout**.
 2. Pay with **`4242 4242 4242 4242`**, any future expiry date and any CVC. You land on the confirmation page, which shows *Confirming your payment…* until the `checkout.session.completed` webhook marks the order **Paid**. The redirect itself never changes the order status.
-3. Try **`4000 0000 0000 0002`**. Stripe declines the card, and the `payment_intent.payment_failed` webhook records the attempt and **expires the Checkout Session**. Stripe then sends `checkout.session.expired`, which cancels the order and releases the reserved stock. Cancellation waits for the session to expire, so a successful retry can never be charged against a cancelled order.
+3. Try **`4000 0000 0000 0002`**. Stripe declines the card and keeps Checkout open, so the page shows the decline and its back link instead of the session-timeout screen. The `payment_intent.payment_failed` webhook records the attempt on the order timeline and **does not** expire the session or cancel the order (expiring on decline would replace Stripe's decline UI with a timeout message). Try another card on the same session, use the back link to return to the order, or wait for the 31-minute session expiry. Reserved stock is released when you abandon checkout (Stripe back button to `cancel_url`, **Cancel order**, or any cart change while a pending checkout cookie is set), when `checkout.session.expired` fires, or when an admin cancels. App-side release and the expiry webhook are idempotent: if you already cancelled, expiry is acknowledged without double-releasing stock.
 4. Replay any event. Replays are acknowledged with `200` and never processed twice:
    ```bash
    stripe events list --limit 5
@@ -107,7 +107,7 @@ Webhook events used: `checkout.session.completed`, `checkout.session.expired`, `
 npm run lint              # ESLint (next/core-web-vitals + TypeScript)
 npm run typecheck         # tsc --noEmit
 npm run build             # production build
-npm run db:test           # pgTAP: 50 tests covering RLS, privileges, stock, the state machine, webhook idempotency
+npm run db:test           # pgTAP: 63 tests — RLS, privileges, stock, state machine, webhooks, storefront events, checkout abandon
 npm run test:concurrency  # 24 concurrent buyers race for 3 units; exactly 3 must win
 ```
 
@@ -116,7 +116,7 @@ npm run test:concurrency  # 24 concurrent buyers race for 3 units; exactly 3 mus
 1. **Database.** Create a Supabase project, then:
    ```bash
    npx supabase link --project-ref <project-ref>
-   npx supabase db push                  # applies supabase/migrations
+   npx supabase db push                  # applies supabase/migrations (includes storefront_events, decline UX, checkout_abandoned)
    npm run seed:users -- --hosted        # test accounts (needs the hosted keys in .env.local)
    ```
    To load the sample catalogue as well, run `supabase/seed.sql` once in the SQL editor, or use `npx supabase db push --include-seed`.
@@ -132,6 +132,7 @@ npm run test:concurrency  # 24 concurrent buyers race for 3 units; exactly 3 mus
 src/
   app/                    Routes (pages, layouts, route handlers)
     admin/                Admin panel (layout + every page call requireAdmin())
+    api/events/           SSE stream of catalogue changes (authenticated)
     api/webhooks/stripe/  Stripe webhook (signature-verified, idempotent)
     auth/callback/        Email link landing (PKCE code / token_hash)
   features/               Feature modules: server actions, queries, client components

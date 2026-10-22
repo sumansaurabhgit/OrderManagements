@@ -1,10 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type Stripe from "stripe";
 import { z } from "zod";
 
+import { PENDING_CHECKOUT_COOKIE } from "@/features/checkout/pending-checkout";
+import { revalidateAfterCheckoutRelease } from "@/features/checkout/revalidate-after-release";
+import { releasePendingCheckoutOrder } from "@/features/checkout/release-pending";
 import { fail, ok, parseDbError, type ActionResult } from "@/lib/action-result";
 import { getCurrentUser } from "@/lib/auth";
 import { getAppUrl } from "@/lib/env";
@@ -57,6 +61,12 @@ export async function startCheckout(items: CheckoutItem[]): Promise<ActionResult
   const parsed = checkoutItemsSchema.safeParse(items);
   if (!parsed.success) {
     return fail("Your cart contains invalid items. Please refresh the page and try again.", { code: "INVALID_CART" });
+  }
+
+  const pendingId = (await cookies()).get(PENDING_CHECKOUT_COOKIE)?.value;
+  if (pendingId) {
+    const previous = await cancelPendingCheckoutOrder(pendingId);
+    if (!previous.ok) return previous;
   }
 
   const supabase = await createServerSupabaseClient();
@@ -114,10 +124,20 @@ export async function startCheckout(items: CheckoutItem[]): Promise<ActionResult
     if (releaseError) {
       console.error("[checkout] CRITICAL: failed to release reservation", { orderId, releaseError });
     }
+    await clearPendingCheckoutCookie();
     return fail("We couldn't start the payment, so nothing was reserved or charged. Please try again.", {
       code: "PAYMENT_PROVIDER_ERROR",
     });
   }
+
+  const cookieStore = await cookies();
+  cookieStore.set(PENDING_CHECKOUT_COOKIE, orderId, {
+    path: "/",
+    sameSite: "lax",
+    maxAge: CHECKOUT_SESSION_TTL_SECONDS,
+    httpOnly: false,
+    secure: process.env.NODE_ENV === "production",
+  });
 
   const { error: attachError } = await createAdminSupabaseClient().rpc("attach_checkout_session", {
     p_order_id: orderId,
@@ -131,6 +151,28 @@ export async function startCheckout(items: CheckoutItem[]): Promise<ActionResult
   }
 
   redirect(session.url);
+}
+
+async function clearPendingCheckoutCookie() {
+  const cookieStore = await cookies();
+  cookieStore.set(PENDING_CHECKOUT_COOKIE, "", { path: "/", maxAge: 0 });
+}
+
+/**
+ * Releases the stock held by the signed-in customer's unpaid checkout.
+ * Expires the Stripe session first so it can no longer be paid. Already
+ * cancelled or paid orders are left untouched, so the later
+ * checkout.session.expired webhook cannot release the same units twice.
+ */
+export async function cancelPendingCheckoutOrder(orderId: string): Promise<ActionResult<{ released: boolean }>> {
+  const result = await releasePendingCheckoutOrder(orderId);
+  if (result.ok) {
+    await clearPendingCheckoutCookie();
+    if (result.data.released) {
+      revalidateAfterCheckoutRelease(orderId);
+    }
+  }
+  return result;
 }
 
 export type CancelOrderState = ActionResult | null;

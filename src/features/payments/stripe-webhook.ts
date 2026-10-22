@@ -3,7 +3,7 @@ import "server-only";
 import type Stripe from "stripe";
 import { z } from "zod";
 
-import { closeCheckoutSession, getStripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import type { Json } from "@/types/database";
 
@@ -148,14 +148,15 @@ export async function processStripeEvent(event: Stripe.Event, payload: Json): Pr
   const result = rpcResultSchema.parse(data);
 
   if (result.follow_up === "expire_checkout_session" && result.stripe_session_id) {
-    // A declined card does not end a Checkout Session (the customer may
-    // retry). We expire it so stock is released promptly; the resulting
-    // checkout.session.expired event performs the cancellation. If the retry
-    // already succeeded, the session is complete and nothing is cancelled.
-    const closed = await closeCheckoutSession(result.stripe_session_id);
-    console.info("[stripe-webhook] checkout session close after failed payment", {
+    // Older databases ask us to expire the session as soon as a card is
+    // declined. Doing that replaces Stripe Checkout's decline message with
+    // "You're all done here" and removes the back link while the customer is
+    // still on the page. Leave the session open so they can read the decline,
+    // try another card, or return to the shop. Reserved stock is released when
+    // the session expires on its own, or when the customer or an admin cancels.
+    console.info("[stripe-webhook] declined payment left the Checkout Session open", {
       orderId: result.order_id,
-      result: closed,
+      sessionId: result.stripe_session_id,
     });
   }
 

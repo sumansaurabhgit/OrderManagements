@@ -16,14 +16,18 @@ export function ProductImage({
   alt,
   sizes,
   priority = false,
+  framed = true,
+  className = "",
 }: {
   src: string | null;
   alt: string;
   sizes: string;
   priority?: boolean;
+  framed?: boolean;
+  className?: string;
 }) {
   return (
-    <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-stone-100">
+    <div className={`relative aspect-square w-full overflow-hidden bg-zinc-100 ${framed ? "rounded-lg" : ""}`}>
       {src ? (
         <Image
           src={src}
@@ -32,10 +36,10 @@ export function ProductImage({
           sizes={sizes}
           priority={priority}
           unoptimized={shouldSkipOptimisation(src)}
-          className="object-cover"
+          className={`object-cover ${className}`}
         />
       ) : (
-        <div className="flex h-full items-center justify-center text-stone-400">
+        <div className="flex h-full items-center justify-center text-zinc-400">
           <ImageOff aria-hidden className="size-8" />
           <span className="sr-only">No image available</span>
         </div>

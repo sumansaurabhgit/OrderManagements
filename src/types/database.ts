@@ -280,6 +280,39 @@ export type Database = {
           },
         ];
       };
+      storefront_events: {
+        Row: {
+          created_at: string;
+          event_type: string;
+          id: number;
+          message: string;
+          product_id: string | null;
+        };
+        ComputedFields: never;
+        Insert: {
+          created_at?: string;
+          event_type: string;
+          id?: never;
+          message: string;
+          product_id?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          event_type?: string;
+          id?: never;
+          message?: string;
+          product_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "storefront_events_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       stripe_events: {
         Row: {
           duplicate_count: number;

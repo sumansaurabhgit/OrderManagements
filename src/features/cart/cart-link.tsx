@@ -12,19 +12,14 @@ export function CartLink() {
   return (
     <Link
       href="/cart"
-      className="relative inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-100"
+      className="inline-flex items-center gap-2 rounded-full bg-zinc-900 px-4 py-2 text-xs font-medium text-white shadow-sm transition-all hover:bg-zinc-800 hover:shadow"
     >
-      <ShoppingBag aria-hidden className="size-4" />
+      <ShoppingBag aria-hidden className="size-3.5" />
       <span>Cart</span>
       <span className="sr-only">, {count} {count === 1 ? "item" : "items"}</span>
-      {count > 0 ? (
-        <span
-          aria-hidden
-          className="ml-0.5 rounded-full bg-emerald-700 px-1.5 py-0.5 text-xs font-semibold leading-none text-white"
-        >
-          {count}
-        </span>
-      ) : null}
+      <span aria-hidden className="rounded-full bg-emerald-400 px-1.5 py-0.5 font-bold text-zinc-950">
+        {count}
+      </span>
     </Link>
   );
 }

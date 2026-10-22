@@ -149,7 +149,8 @@ export function CartView({ isSignedIn }: { isSignedIn: boolean }) {
           <span className="font-semibold">{formatMoney(subtotal)}</span>
         </div>
         <p className="text-xs text-stone-500">
-          Prices and stock are confirmed when you check out. Items are reserved for 30 minutes while you pay.
+          Prices and stock are confirmed when you check out. Items stay reserved for 30 minutes while you pay, and are
+          released immediately if you leave checkout or change this cart.
         </p>
         {error ? <Alert tone="error">{error}</Alert> : null}
         {isSignedIn ? (

@@ -11,7 +11,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(50);
+select plan(63);
 
 -- -----------------------------------------------------------------------------
 -- Fixtures (as the database owner)
@@ -261,10 +261,17 @@ select is((select available_stock from public.products where id = current_settin
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
+select set_config('test.failed_payment', public.handle_stripe_webhook_atomic(
+  'evt_test_failed_1', 'payment_intent.payment_failed', 'payment_failed',
+  current_setting('test.order2_id')::uuid, null, 'pi_test_2', null, null, 'Your card was declined.')::text, true);
+
 select is(
-  public.handle_stripe_webhook_atomic('evt_test_failed_1', 'payment_intent.payment_failed', 'payment_failed',
-    current_setting('test.order2_id')::uuid, null, 'pi_test_2', null, null, 'Your card was declined.') ->> 'outcome',
-  'payment_failed_session_expiry_requested', 'a declined card requests session expiry instead of cancelling directly');
+  current_setting('test.failed_payment')::jsonb ->> 'outcome',
+  'payment_failed_recorded', 'a declined card is recorded and the checkout session stays open');
+
+select ok(
+  (current_setting('test.failed_payment')::jsonb ->> 'follow_up') is null,
+  'a declined card does not ask the app to expire the checkout session');
 
 select is(
   public.handle_stripe_webhook_atomic('evt_test_expired_1', 'checkout.session.expired', 'checkout_expired',
@@ -276,6 +283,95 @@ reset role;
 select is((select available_stock from public.products where id = current_setting('test.mug_id')::uuid),
   current_setting('test.mug_on_hand')::int + 6,
   'expiry released the reserved mugs');
+
+-- -----------------------------------------------------------------------------
+-- Live storefront events
+-- -----------------------------------------------------------------------------
+set local role anon;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+select throws_ok(
+  'select * from public.storefront_events',
+  '42501', null, 'anon cannot read live storefront events');
+reset role;
+
+set local role authenticated;
+select set_config('request.jwt.claims',
+  json_build_object('sub', current_setting('test.customer'), 'role', 'authenticated')::text, true);
+select lives_ok(
+  'select id from public.storefront_events limit 1',
+  'a signed-in user can read live storefront events');
+select throws_ok(
+  $$insert into public.storefront_events (event_type, message) values ('product.created', 'forged')$$,
+  '42501', null, 'a customer cannot publish live storefront events');
+reset role;
+
+set local role authenticated;
+select set_config('request.jwt.claims',
+  json_build_object('sub', current_setting('test.admin'), 'role', 'authenticated')::text, true);
+select public.admin_adjust_stock(current_setting('test.mug_id')::uuid, 1, 'Live event coverage');
+select ok(
+  (select count(*) from public.storefront_events
+    where product_id = current_setting('test.mug_id')::uuid
+      and event_type = 'stock.updated') > 0,
+  'adjusting stock records a live storefront event');
+reset role;
+
+-- -----------------------------------------------------------------------------
+-- Leaving checkout releases stock once; a later expiry webhook does not
+-- -----------------------------------------------------------------------------
+set local role authenticated;
+select set_config('request.jwt.claims',
+  json_build_object('sub', current_setting('test.customer'), 'role', 'authenticated')::text, true);
+select set_config('test.stock_before_abandon',
+  (select available_stock::text from public.products where id = current_setting('test.mug_id')::uuid), true);
+select set_config('test.abandon_order', public.create_order_and_reserve_stock(jsonb_build_array(jsonb_build_object(
+  'product_id', current_setting('test.mug_id')::uuid, 'quantity', 1))) ->> 'order_id', true);
+
+select is((select available_stock from public.products where id = current_setting('test.mug_id')::uuid),
+  current_setting('test.stock_before_abandon')::int - 1,
+  'abandoning checkout starts from a reserved unit');
+
+select is(
+  public.cancel_own_pending_order(current_setting('test.abandon_order')::uuid, 'checkout_abandoned') ->> 'changed',
+  'true', 'leaving checkout cancels the unpaid order');
+
+select is((select available_stock from public.products where id = current_setting('test.mug_id')::uuid),
+  current_setting('test.stock_before_abandon')::int,
+  'leaving checkout restores the reserved unit');
+reset role;
+
+select is(
+  (select reason from public.stock_movements
+    where reference = current_setting('test.abandon_order') and delta > 0
+    order by created_at desc limit 1),
+  'Customer cancelled checkout / modified cart',
+  'the release is written to the stock ledger');
+
+set local role authenticated;
+select set_config('request.jwt.claims',
+  json_build_object('sub', current_setting('test.customer'), 'role', 'authenticated')::text, true);
+select is(
+  public.cancel_own_pending_order(current_setting('test.abandon_order')::uuid, 'checkout_abandoned') ->> 'changed',
+  'false', 'cancelling the same checkout again does not move stock');
+
+select is((select available_stock from public.products where id = current_setting('test.mug_id')::uuid),
+  current_setting('test.stock_before_abandon')::int,
+  'a repeated cancel leaves the restored stock unchanged');
+reset role;
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select is(
+  public.handle_stripe_webhook_atomic(
+    'evt_test_abandon_expired', 'checkout.session.expired', 'checkout_expired',
+    current_setting('test.abandon_order')::uuid) ->> 'outcome',
+  'ignored_order_not_pending',
+  'the expiry webhook does not release stock that checkout abandonment already restored');
+reset role;
+
+select is((select available_stock from public.products where id = current_setting('test.mug_id')::uuid),
+  current_setting('test.stock_before_abandon')::int,
+  'stock is unchanged after the late expiry webhook');
 
 -- -----------------------------------------------------------------------------
 -- Invariants that hold for every writer

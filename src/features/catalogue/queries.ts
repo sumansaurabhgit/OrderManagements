@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { z } from "zod";
 
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -30,7 +31,7 @@ export async function listActiveProducts(): Promise<StorefrontProduct[]> {
   return data;
 }
 
-export async function getActiveProduct(id: string): Promise<StorefrontProduct | null> {
+export const getActiveProduct = cache(async (id: string): Promise<StorefrontProduct | null> => {
   if (!z.uuid().safeParse(id).success) return null;
 
   const supabase = await createServerSupabaseClient();
@@ -43,4 +44,4 @@ export async function getActiveProduct(id: string): Promise<StorefrontProduct | 
 
   if (error) throw new Error(`Failed to load product: ${error.message}`);
   return data;
-}
+});

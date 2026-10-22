@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
 
-import { SiteHeader } from "@/components/site-header";
+import { LiveUpdates } from "@/components/live-updates";
+import { SiteFooter } from "@/components/site-footer";
+import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
+import { PendingCheckoutGuard } from "@/features/checkout/pending-checkout-client";
 
 import "./globals.css";
 
@@ -19,19 +23,19 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col font-sans">
         <a
           href="#main"
-          className="sr-only rounded-md bg-emerald-700 px-3 py-2 text-white focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50"
+          className="sr-only rounded-md bg-zinc-900 px-3 py-2 text-white focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50"
         >
           Skip to content
         </a>
-        <SiteHeader />
-        <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+        <Suspense fallback={<SiteHeaderFallback />}>
+          <SiteHeader />
+        </Suspense>
+        <LiveUpdates />
+        <PendingCheckoutGuard />
+        <main id="main" className="mx-auto w-full max-w-7xl flex-1 px-4 py-10">
           {children}
         </main>
-        <footer className="border-t border-stone-200 bg-white">
-          <p className="mx-auto max-w-6xl px-4 py-4 text-xs text-stone-500">
-            Larkspur Goods is a demo store. Payments run in Stripe test mode — no real cards are charged.
-          </p>
-        </footer>
+        <SiteFooter />
       </body>
     </html>
   );

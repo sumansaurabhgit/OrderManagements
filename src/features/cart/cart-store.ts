@@ -32,9 +32,26 @@ export type CatalogueSnapshot = {
 };
 
 const EMPTY: CartLine[] = [];
-let lines: CartLine[] = EMPTY;
-let hydrated = false;
-const listeners = new Set<() => void>();
+
+type CartStore = {
+  lines: CartLine[];
+  hydrated: boolean;
+  listeners: Set<() => void>;
+};
+
+// One store for the whole tab. The header badge and the cart page can load
+// this module as separate copies; a module-level variable would let a removal
+// update the list while the count stayed stale.
+function getStore(): CartStore {
+  if (typeof window === "undefined") {
+    return { lines: EMPTY, hydrated: false, listeners: new Set() };
+  }
+  const host = window as Window & { __larkspurCart?: CartStore };
+  if (!host.__larkspurCart) {
+    host.__larkspurCart = { lines: EMPTY, hydrated: false, listeners: new Set() };
+  }
+  return host.__larkspurCart;
+}
 
 function readStorage(): CartLine[] {
   try {
@@ -48,36 +65,41 @@ function readStorage(): CartLine[] {
 }
 
 function commit(next: CartLine[]) {
-  lines = next;
+  const store = getStore();
+  store.lines = next;
+  store.hydrated = true;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {
     // Storage may be unavailable (private mode, quota); the in-memory cart still works.
   }
-  for (const listener of listeners) listener();
+  for (const listener of store.listeners) listener();
 }
 
 function subscribe(listener: () => void) {
-  listeners.add(listener);
+  const store = getStore();
+  store.listeners.add(listener);
   const onStorage = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY) {
-      lines = readStorage();
+      store.lines = readStorage();
+      store.hydrated = true;
       listener();
     }
   };
   window.addEventListener("storage", onStorage);
   return () => {
-    listeners.delete(listener);
+    store.listeners.delete(listener);
     window.removeEventListener("storage", onStorage);
   };
 }
 
 function getSnapshot(): CartLine[] {
-  if (!hydrated) {
-    lines = readStorage();
-    hydrated = true;
+  const store = getStore();
+  if (!store.hydrated) {
+    store.lines = readStorage();
+    store.hydrated = true;
   }
-  return lines;
+  return store.lines;
 }
 
 function getServerSnapshot(): CartLine[] {

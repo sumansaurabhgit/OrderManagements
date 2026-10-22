@@ -7,6 +7,8 @@ import { OrderStatusBadge } from "@/components/order-status-badge";
 import { OrderTimeline } from "@/components/order-timeline";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
+import { CheckoutCancelledToast } from "@/features/checkout/pending-checkout-client";
+import { releasePendingCheckoutOrder } from "@/features/checkout/release-pending";
 import { CancelOrderForm } from "@/features/orders/cancel-order-form";
 import { getMyOrder } from "@/features/orders/queries";
 import { requireAuth } from "@/lib/auth";
@@ -20,11 +22,27 @@ export default async function OrderPage(props: PageProps<"/orders/[id]">) {
   const { id } = await props.params;
   const searchParams = await props.searchParams;
   const user = await requireAuth(`/orders/${id}`);
+  const returnedFromCheckout = searchParams.cancelled === "true";
+  let releaseError: string | null = null;
+  let clearedPendingCookie = false;
+  let stockReleased = false;
+  if (returnedFromCheckout) {
+    const released = await releasePendingCheckoutOrder(id);
+    if (!released.ok) releaseError = released.error;
+    else {
+      clearedPendingCookie = true;
+      stockReleased = released.data.released;
+    }
+  }
   const order = await getMyOrder(user.id, id);
   if (!order) notFound();
 
   const isPending = order.status === "pending_payment";
   const expiresAt = order.checkout_expires_at ? new Date(order.checkout_expires_at) : null;
+  const history = parseStatusHistory(order.status_history);
+  const cardDeclined = history.some(
+    (entry) => entry.actor === "stripe" && (entry.note?.includes("Payment attempt failed") ?? false),
+  );
 
   return (
     <div className="space-y-8">
@@ -41,12 +59,39 @@ export default async function OrderPage(props: PageProps<"/orders/[id]">) {
         <OrderStatusBadge status={order.status} />
       </div>
 
-      {isPending && searchParams.cancelled === "true" ? (
+      {cardDeclined ? (
+        <Alert tone="error">
+          {isPending
+            ? "Your card was declined, so the payment did not go through. You have not been charged. Try another card, or go back to the shop."
+            : "Your card was declined and the payment did not go through. You have not been charged, and the reserved items have been released."}
+        </Alert>
+      ) : null}
+
+      {returnedFromCheckout ? (
+        <CheckoutCancelledToast
+          show={order.status === "cancelled"}
+          clearPending={clearedPendingCookie}
+          refreshCatalog={stockReleased}
+        />
+      ) : null}
+      {returnedFromCheckout && order.status === "cancelled" ? (
+        <Alert tone="success">Checkout cancelled — your reserved stock has been released.</Alert>
+      ) : null}
+
+      {releaseError ? <Alert tone="error">{releaseError}</Alert> : null}
+
+      {isPending && !cardDeclined && returnedFromCheckout && !releaseError ? (
         <Alert tone="warning">
           Checkout was cancelled before payment.
           {expiresAt ? ` Your items stay reserved until ${dateTime.format(expiresAt)}; ` : " "}
           resume payment or cancel the order to release them now.
         </Alert>
+      ) : null}
+
+      {cardDeclined && !isPending ? (
+        <Link href="/" className={buttonClasses({ variant: "secondary" })}>
+          Back to shop
+        </Link>
       ) : null}
 
       {isPending ? (
@@ -61,9 +106,12 @@ export default async function OrderPage(props: PageProps<"/orders/[id]">) {
           <div className="flex flex-wrap items-start gap-3">
             {order.resume_checkout_url ? (
               <a href={order.resume_checkout_url} className={buttonClasses()}>
-                Complete payment
+                {cardDeclined ? "Try another card" : "Complete payment"}
               </a>
             ) : null}
+            <Link href="/" className={buttonClasses({ variant: "secondary" })}>
+              Back to shop
+            </Link>
             <CancelOrderForm orderId={order.id} />
           </div>
         </section>
@@ -86,7 +134,7 @@ export default async function OrderPage(props: PageProps<"/orders/[id]">) {
           <h2 id="timeline-heading" className="text-lg font-semibold">
             Status history
           </h2>
-          <OrderTimeline entries={parseStatusHistory(order.status_history)} />
+          <OrderTimeline entries={history} />
         </section>
       </div>
     </div>
